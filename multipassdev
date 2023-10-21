@@ -1,0 +1,56 @@
+#!/bin/sh
+
+set -eu
+
+has_plymouth=""
+
+print_message() {
+    if [ -n "$has_plymouth" ]; then
+        plymouth message --text="$1"
+    else
+        printf "%s\n" "$1" >&2
+    fi
+}
+
+if command -v plymouth >/dev/null && plymouth --ping; then
+    has_plymouth="y"
+fi
+
+keys="$(cat /etc/cryptsetup-multipassdev/keys)"
+
+if [ -n "$keys" ]; then
+    for key in $keys; do
+        device="$(printf "%s" "$key" | cut -d: -f1)"
+
+        if [ -b "$device" ]; then
+            file="$(printf "%s" "$key" | cut -d: -f2 -s)"
+
+            if [ -z "$file" ]; then
+                file="key"
+            fi
+
+            print_message "Unlocking $CRYPTTAB_NAME using $device:/$file"
+
+            mount_point="$(mktemp -d)"
+            key_emitted=""
+
+            if mount -o ro "$device" "$mount_point" 1>&2; then
+                if cat "$mount_point/$file"; then
+                    key_emitted="y"
+                fi
+
+                umount "$mount_point" 1>&2
+            fi
+
+            rmdir "$mount_point" 1>&2
+
+            if [ -n "$key_emitted" ]; then
+                exit
+            fi
+        fi
+    done
+
+    print_message "No keys are available, falling back to manual password entry"
+fi
+
+/lib/cryptsetup/askpass "Please enter the password for $CRYPTTAB_NAME: "
